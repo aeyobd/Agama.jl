@@ -11,6 +11,8 @@ public Orbit
 export orbit
 export AgamaUnits
 public acceleration_scale, potential_scale, length_scale
+export ActionMapper, ActionFinder
+export actions, actions_angles, from_actions
 
 
 const agama = Ref{Py}()
@@ -82,8 +84,24 @@ end
 
 
 
+"""
+    py2vec(x::Py)::Vector{F}
+Convert a python object to a vector of floats
+"""
 py2vec(x::Py)::Vector{F} = pyconvert(Vector{F}, x)
+
+"""
+    py2mat(x::Py)::Matrix{F}
+Convert and transpose a python object to a matrix of floats.
+Transposition is helpful for dealing with numpy arrays
+"""
 py2mat(x::Py)::Matrix{F} = pyconvert(Matrix{F}, x)'
+
+"""
+    mat2py(x::Py)::Py
+Convert and transpose a julia matrix to a numpy array.
+Transposition is helpful for dealing with numpy arrays.
+"""
 mat2py(x::AbstractMatrix{<:Real})::Py = np[].array(x')
 
 
@@ -164,17 +182,17 @@ Compute the gravitational stress (deivative of acceleration) at the given positi
 Return a 6 vector or 6xN matrix with derivatives in order xx, yy, zz, xy, yz, zx
 """
 function stress(potential::Potential, position::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
-    kwargs = time_to_kwargs(units)
+    kwargs = time_to_kwargs(t, units)
 
-    pyders = potential._py.eval(pos ./ length_scale(units), der=true; kwargs...) 
+    pyders = potential._py.eval(position ./ length_scale(units), der=true; kwargs...) 
     return py2vec(pyders) * acceleration_scale(units) / length_scale(units)
 end
 
 
 function stress(potential::Potential, position::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
-    kwargs = time_to_kwargs(units)
+    kwargs = time_to_kwargs(t, units)
 
-    pyders = potential._py.eval(mat2py(pos ./ length_scale(units)), der=true; kwargs...) 
+    pyders = potential._py.eval(mat2py(position ./ length_scale(units)), der=true; kwargs...) 
     return py2mat(pyders) * acceleration_scale(units) / length_scale(units)
 end
 
@@ -352,6 +370,128 @@ function time_to_kwargs(t, units::AgamaUnits)
 
     return kwargs
 end
+
+
+struct ActionFinder
+    _py::Py
+end
+
+function ActionFinder(pot::Potential; kwargs...)
+    return ActionFinder(
+        agama[].ActionFinder(pot._py; kwargs...)
+    )
+end
+
+
+struct ActionMapper
+    _py::Py
+end
+
+
+function ActionMapper(pot::Potential; kwargs...)
+    return ActionMapper(
+        agama[].ActionMapper(pot._py; kwargs...)
+    )
+end
+
+
+"""
+    actions(action_finder, positions, velocities[, units])
+
+Compute the actions of the given positions and velocities using the action finder object.
+Returns a vector or matrix of actions in the order R, z, phi
+
+See also ActionFinder documentation
+"""
+function actions(af::ActionFinder, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real},
+        units::AgamaUnits=current_units())
+    pos_a = positions / length_scale(units)
+    vel_a = velocities / length_scale(units)
+    posvel = vcat(pos_a, vel_a)
+    actions_a = af._py(posvel) |> py2vec
+    return actions_a * velocity_scale(units) * length_scale(units)
+end
+
+
+function actions(af::ActionFinder, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real},
+        units::AgamaUnits=current_units())
+    pos_a = positions / length_scale(units)
+    vel_a = velocities / length_scale(units)
+    posvel = vcat(pos_a, vel_a) |> mat2py
+    actions_a = af._py(posvel) |> py2mat
+    return actions_a * velocity_scale(units) * length_scale(units)
+end
+
+
+"""
+    actions_angles(action_finder, positions, velocities[, units])
+
+Compute the actions, angles, and frequencies. of the given positions and velocities using the action finder object.
+Returns a tuple of three vectors or matricies. The order R, z, phi in the first dimension
+
+See also ActionFinder documentation
+"""
+function actions_angles(af::ActionFinder, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units())
+    pos_a = positions ./ length_scale(units)
+    vel_a = velocities ./ length_scale(units)
+
+    posvel = vcat(pos_a, vel_a)
+    aang = af._py(posvel, angles=true, frequencies=true)
+    actions_a = aang[0] |> py2vec
+    angles_a = aang[1] |> py2vec
+    freq_a = aang[2] |> py2vec
+
+    act = actions_a * velocity_scale(units) * length_scale(units)
+    return act, angles_a, freq_a
+end
+
+
+function actions_angles(af::ActionFinder, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real}, units::AgamaUnits=current_units())
+    pos_a = positions ./ length_scale(units)
+    vel_a = velocities ./ length_scale(units)
+
+    posvel = vcat(pos_a, vel_a) |> mat2py
+    aang = af._py(posvel; angles=true, frequencies=true) 
+    actions_a = aang[0] |> py2mat
+    angles_a = aang[1] |> py2mat
+    freq_a = aang[2] |> py2mat
+
+    act = actions_a * velocity_scale(units) * length_scale(units)
+    return act, angles_a, freq_a
+end
+
+
+"""
+    from_actions(am, actions, angles[, units])
+
+Find the position and velocity given the actions and angles using the provided action mapper
+
+See also ActionMapper documentation
+"""
+function from_actions(am::ActionMapper, actions::AbstractVector{<:Real}, angles::AbstractVector{<:Real}, 
+        units::AgamaUnits=current_units())
+
+    actions_a = actions / (length_scale(units) * velocity_scale(units))
+
+    posvel = am._py(vcat(actions_a, angles)) |> py2vec
+    pos = posvel[1:3] * length_scale(units)
+    vel = posvel[4:6] * velocity_scale(units)
+    return pos, vel
+end
+
+
+function from_actions(am::ActionMapper, actions::AbstractMatrix{<:Real}, angles::AbstractMatrix{<:Real}; units::AgamaUnits=current_units(), kwargs...)
+
+    actions_a = actions / (length_scale(units) * velocity_scale(units))
+
+    aang_py = vcat(actions_a, angles) |> mat2py
+    posvel = am._py(aang_py) |> py2mat
+    pos = posvel[1:3, :] * length_scale(units)
+    vel = posvel[4:6, :] * velocity_scale(units)
+    return pos, vel
+end
+
+
 
 # Documentation
 
@@ -538,7 +678,45 @@ GalaxyModel is a class that takes together a Potential, a DistributionFunction, 
 """
 function GalaxyModel end
 
-end
+
+"""
+    ActionMapper(potential; kwargs...)
+
+# Agama documentation
+ActionMapper performs an inverse operation to ActionFinder, namely, compute the position and velocity (and optionally frequencies) from actions and angles.
+It performs exact mapping for spherical potentials and approximate mapping (using the Torus Machine) for axisymmetric potentials.
+The object is created for a given potential; an optional parameter 'tol' specifies the accuracy of torus construction.
+The () operator computes the positions and velocities for one or more combinations of actions and angles (Jr, Jz, Jphi, theta_r, theta_z, theta_phi), returning a sextet of floats (x,y,z,vx,vy,vz) for a single input point, or an Nx6 array of such sextets in case the input is a Nx6 array of action/angle points.
+If an optional argument 'frequencies' is True, it additionally returns a second array containing a triplet of frequencies (Omega_r, Omega_z, Omega_phi) for a single input point, or an Nx3 array of such triplets when the input contains more than one point.
+Example:
+  am = agama.ActionMapper(pot)   # create an action mapper
+  af = agama.ActionFinder(pot)   # create an inverse action finder
+  aa = [ [1., 2., 3., 4., 5., 6], [6., 5., 4., 3., 2., 1.] ]   # two action/angle points
+  xv, Om = am(aa)   # map these to two position/velocity points and two frequency triplets
+  J,theta,Omega = af(xv, angles=True, frequencies=True)   # convert from x,v to act,ang,freq
+  print(Om, Omega)  # frequencies of forward and inverse mappings should be roughly equal
+  print(J, aa[:,0:3])   # computed actions should also approximately match the input values
+  print(theta, aa[:,3:6])   # and same for angles
+
+"""
+function ActionMapper end
+
+
+"""
+  ActionFinder object is created for a given potential (provided as the first argument to the constructor); if the potential is axisymmetric, there is a further option to use interpolation tables for actions (optional second argument 'interp=...', False by default), which speeds up computation of actions (but not frequencies and angles) at the expense of a somewhat lower accuracy.
+  The () operator computes any combination of actions, angles and frequencies for a given position/velocity point or an array of points.
+  Arguments:
+    point - a sextet of floats (x,y,z,vx,vy,vz) or an Nx6 array of N such sextets.
+    actions (bool, default True) - whether to compute actions.
+    angles (bool, default False) - whether to compute angles (extra work).
+    frequencies (bool, default is taken from the "angles" argument) - whether to compute frequencies (extra work).
+  Returns:
+    each requested quantity (actions, angles, frequencies) is a triplet of floats when the input is a single point, otherwise an array of Nx3 floats; the order is Jr, Jz, Jphi for actions and similarly for other quantities (thetas and Omegas).
+    If only one quantity is requested (e.g., just actions), it is returned directly, otherwise a tuple of several arrays is returned (e.g., actions and angles).
+"""
+function ActionFinder end
 
 
 
+
+end # module

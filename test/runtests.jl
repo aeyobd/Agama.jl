@@ -52,3 +52,36 @@ end
     o = orbit(pot, pos, vel, timerange=(0, -1.2))
     @test o isa Vector{Agama.Orbit}
 end
+
+
+@testset "actions" begin
+    pot = Potential(type="NFW")
+
+    pos = [1, 0, 0]
+    vel = [0, 0.1, 0]
+    am = ActionMapper(pot)
+    af = ActionFinder(pot)
+
+    act = actions(af, pos, vel)
+    act2, ang, freq = actions_angles(af, pos, vel)
+    pos2, vel2 = from_actions(am, act, ang)
+
+    @test pos2 ≈ pos atol=1e-8
+    @test vel2 ≈ vel atol=1e-8
+    @test act2 ≈ act 
+
+
+
+    pos = rand(3, 4)
+    vel = rand(3, 4) / 5
+    am = ActionMapper(pot)
+    af = ActionFinder(pot)
+
+    act = actions(af, pos, vel)
+    act2, ang, freq = actions_angles(af, pos, vel)
+    pos2, vel2 = from_actions(am, act, ang)
+
+    @test pos2 ≈ pos atol=1e-6
+    @test vel2 ≈ vel atol=1e-6
+    @test act2 ≈ act
+end

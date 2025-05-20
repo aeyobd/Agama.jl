@@ -1,7 +1,7 @@
 name = "Agama"
 uuid = "c9d1a974-9120-43da-b5b1-d69fd551855f"
 authors = ["Daniel Boyea <aeyobd@github.com> and contributors"]
-version = "1.0.1-DEV"
+version = "1.0.2-DEV"
 
 [deps]
 CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
@@ -10,7 +10,7 @@ PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 [compat]
 CondaPkg = "0.2.25"
 PythonCall = "0.9.24"
-julia = "1.6.7"
+julia = "1.11"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
