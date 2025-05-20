@@ -6,14 +6,63 @@ export py2f, py2vec, py2mat
 export Potential, DistributionFunction, GalaxyModel
 export agama
 export sample
-export calc_Φ, calc_acceleration, calc_ρ
-export orbit, Orbit
+export potential, acceleration, density, enclosed_mass
+public Orbit
+export orbit
+export AgamaUnits
+public acceleration_scale, potential_scale, length_scale
 
 
 const agama = Ref{Py}()
 const np = Ref{Py}()
 
 F = Float64
+
+
+"""
+    AgamaUnits(length_scale, velocity_scale, mass_scale)
+
+Struct representing conversion from and too agama units.
+i.e. lengths and velocities are devided by their respective scales
+when translating to agama and multiplied when translating from
+
+Note that `mass_scale` should be unity unless using a unit system
+where G!=1.
+"""
+Base.@kwdef struct AgamaUnits
+    length_scale::Real = 1
+    velocity_scale::Real = 1
+    G::Real = 1 # only needed for G!=1
+end
+
+length_scale(u::AgamaUnits) = u.length_scale
+velocity_scale(u::AgamaUnits) = u.velocity_scale
+acceleration_scale(u::AgamaUnits) = u.velocity_scale / time_scale(u) * u.G
+time_scale(u::AgamaUnits) = u.length_scale / u.velocity_scale
+mass_scale(u::AgamaUnits) = velocity_scale(u)^2
+density_scale(u::AgamaUnits) = mass_scale(u) / length_scale(u)^3 # TODO: not sure about this one for G!=1
+potential_scale(u::AgamaUnits) = u.velocity_scale^2 / u.length_scale * u.G
+
+
+"""
+Units used in vasiliev+2021 (for example) relative to my units
+"""
+const VASILIEV_UNITS = AgamaUnits(velocity_scale=0.0048216007714561235)
+
+global _global_units::AgamaUnits = AgamaUnits()
+
+function set_units!(u::AgamaUnits)
+    global _global_units = u
+    return current_units()
+end
+
+function set_units!(; length_scale=1.0, velocity_scale=1.0)
+    return set_units!(AgamaUnits(length_scale, velocity_scale))
+end
+
+function current_units()::AgamaUnits
+    return _global_units
+end
 
 
 function __init__()
@@ -35,7 +84,6 @@ end
 
 py2vec(x::Py)::Vector{F} = pyconvert(Vector{F}, x)
 py2mat(x::Py)::Matrix{F} = pyconvert(Matrix{F}, x)'
-
 mat2py(x::AbstractMatrix{<:Real})::Py = np[].array(x')
 
 
@@ -43,74 +91,147 @@ struct Potential
     _py::Py
 end
 
+
 function Potential(; kwargs...)
     return Potential(agama[].Potential(;kwargs...))
 end
 
 
 """
-    calc_Φ(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    potential(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
 
 Given a 3xN matrix of positions, returns the potential at each position. 
 Optionally can specify `t`. 
 """
-function calc_Φ(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
-    return potential._py.potential(mat2py(pos); kwargs...) |> py2vec
+function potential(potential::Potential, pos::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+
+    phi_py =  potential._py.potential(mat2py(pos ./ length_scale(units)); kwargs...) 
+    return py2vec(phi_py) .* potential_scale(units)
 end
 
 
 """
-    calc_Φ(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    potential(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
 
 Given a 3 vector of positions, returns the potential at that position.
 Optionally can specify `t`.
 """
-function calc_Φ(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
-    return potential._py.potential(pos; kwargs...) |> py2f
+function potential(potential::Potential, pos::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    phi =  potential._py.potential(pos ./ length_scale(units); kwargs...) |> py2f
+    return phi .* potential_scale(units)
 end
 
 
 """
-    calc_acceleration(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    enclosed_mass(potential::Potential, radii, units; t)
+
+Return the mass enclosed within a sphere of given radius (radii).
+"""
+function enclosed_mass(potential::Potential, radii::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    ms =  potential._py.enclosedMass(radii ./ length_scale(units); kwargs...) |> py2vec
+    return ms .* mass_scale(units)
+end
+
+
+function enclosed_mass(potential::Potential, radii::Real, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    ms =  potential._py.enclosedMass(radii ./ length_scale(units); kwargs...) |> py2f
+    return ms .* mass_scale(units)
+end
+
+
+"""
+    circular_velocity(potential, radii[, units; t=nothing])
+
+Compute the circular velocity at the given radius / radii.
+Uses `enclosed_mass` to compute spherically averaged enclosed mass at each radius.
+"""
+function circular_velocity(potential::Potential, radii, units::AgamaUnits=current_units(); t=nothing)
+    M = enclosed_mass(potential, radii)
+    return @. sqrt(M / r)
+end
+
+
+"""
+    stress(potential, position[, units; t=nothing])
+
+Compute the gravitational stress (deivative of acceleration) at the given position(s), 
+Return a 6 vector or 6xN matrix with derivatives in order xx, yy, zz, xy, yz, zx
+"""
+function stress(potential::Potential, position::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(units)
+
+    pyders = potential._py.eval(pos ./ length_scale(units), der=true; kwargs...) 
+    return py2vec(pyders) * acceleration_scale(units) / length_scale(units)
+end
+
+
+function stress(potential::Potential, position::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(units)
+
+    pyders = potential._py.eval(mat2py(pos ./ length_scale(units)), der=true; kwargs...) 
+    return py2mat(pyders) * acceleration_scale(units) / length_scale(units)
+end
+
+
+"""
+    acceleration(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
 
 Given a 3xN matrix of positions, returns the acceleration at each position.
 Optionally can specify `t`.
 """
-function calc_acceleration(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
-    return potential._py.force(mat2py(pos); kwargs...) |> py2mat
+function acceleration(potential::Potential, pos::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    acc =  potential._py.force(mat2py(pos ./ length_scale(units)); kwargs...) |> py2mat
+    return acc .* acceleration_scale(units)
 end
 
 
 """
-    calc_acceleration(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    acceleration(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
 
 Given a 3 vector of positions, returns the acceleration at that position.
 Optionally can specify `t`.
 """
-function calc_acceleration(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
-    return potential._py.force(pos; kwargs...) |> py2vec
+function acceleration(potential::Potential, pos::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    acc =  potential._py.force(pos ./ length_scale(units); kwargs...) |> py2vec
+    return acc .* acceleration_scale(units)
 end
 
 
 """
-    calc_ρ(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    density(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
 
 Given a 3xN matrix of positions, returns the density at each position.
 Optionally can specify `t`.
 """
-function calc_ρ(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
-    return potential._py.density(mat2py(pos); kwargs...) |> py2vec
+function density(potential::Potential, pos::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    dens =  potential._py.density(mat2py(pos ./ length_scale(units)); kwargs...) |> py2vec
+    return dens .* density_scale(units)
 end
 
 
 """
-    calc_ρ(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    density(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
 
 Given a 3 vector of positions, returns the density at that position.
 Optionally can specify `t`.
 """
-function calc_ρ(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
-    return potential._py.density(pos; kwargs...) |> py2f
+function density(potential::Potential, pos::AbstractVector{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
+
+    dens =  potential._py.density(pos ./ length_scale(units); kwargs...) |> py2f
+    return dens .* density_scale(units)
 end
 
 
@@ -123,6 +244,10 @@ function DistributionFunction(; kwargs...)
     return DistributionFunction(agama[].DistributionFunction(;kwargs...))
 end
 
+
+function DistributionFunction(pot::Potential; kwargs...)
+    return DistributionFunction(agama[].DistributionFunction(; potential=pot._py, kwargs...))
+end
 
 
 struct GalaxyModel
@@ -140,26 +265,93 @@ end
 
 Samples the galaxy model and returns the positions, velocities and masses of the particles
 """
-function sample(gm::GalaxyModel, N::Int)
+function sample(gm::GalaxyModel, N::Int, units::AgamaUnits=current_units())
     posvel, mass = gm._py.sample(N)
     posvel = py2mat(posvel)
     mass = py2vec(mass)
 
-    return (posvel[1:3, :], posvel[4:6, :], mass)
+    return (posvel[1:3, :] .* length_scale(units), posvel[4:6, :] .* velocity_scale(units), mass .* mass_scale(units))
 end
 
 
-struct Orbit
+"""
+    Orbit
 
+A struct representing the result of an Agama orbit
+"""
+Base.@kwdef struct Orbit
+    times::Vector{F}
+    positions::Matrix{F}
+    velocities::Matrix{F}
+    _py::Py
 end
 
 
-function orbit(; kwargs...)
-    pyorbit = agama[].orbit(; kwargs...)
-    return pyorbit
+function orbit(potential, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
+    timestart = timerange[1] * time_scale(units)
+    time = (timerange[2] - timerange[1]) * time_scale(units)
+    ic = [positions ./ length_scale(units); velocities ./ velocity_scale(units)]
+
+    pyorbit = agama[].orbit(ic=ic, time=time, trajsize=N, timestart=timestart, potential=potential._py; kwargs...)
+    
+    pytime = pyorbit[0]
+    pyposvel = pyorbit[1]
+    times = py2vec(pytime) * time_scale(units)
+
+    posvel = py2mat(pyposvel)
+    positions = posvel[1:3, :] .* length_scale(units)
+    velocities = posvel[4:6, :] .* velocity_scale(units)
+
+    return Orbit(times=times, positions=positions, velocities=velocities, _py=pyorbit)
 end
 
 
+function orbit(potential, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
+    timestart = timerange[1] * time_scale(units)
+    time = (timerange[2] - timerange[1]) * time_scale(units)
+    pos_a = positions ./ length_scale(units)
+    vel_a = velocities ./ velocity_scale(units)
+    ic = vcat(pos_a, vel_a)'
+
+    pyorbit = agama[].orbit(ic=ic, time=time, timestart=timestart, potential=potential._py, trajsize=N; kwargs...)
+    
+    Np = size(positions, 2)
+    pytime = pyorbit[0][0]
+    time_a = py2vec(pytime) 
+    times = time_a * time_scale(units)
+
+    orbits = Vector{Orbit}(undef, Np)
+    for i in 1:size(positions, 2)
+        posvel = py2mat(pyorbit[i-1][1])
+        #@assert pyconvert(o[i-1][0]) ≈ time_a
+        positions = posvel[1:3, :] .* length_scale(units)
+        velocities = posvel[4:6, :] .* velocity_scale(units)
+
+        orbits[i] =  Orbit(times=times, positions=positions, velocities=velocities, _py=pyorbit)
+    end
+
+
+    return orbits
+end
+
+
+"""
+    time_to_kwargs(time, units)
+
+Convert time keyword to a kwargs if present, returning a named tuple,
+apply unit conversion.
+"""
+function time_to_kwargs(t, units::AgamaUnits)
+    local kwargs
+
+    if isnothing(t)
+        kwargs = (;)
+    else
+        kwargs = (;t=t ./ time_scale(units))
+    end
+
+    return kwargs
+end
 
 # Documentation
 
@@ -301,6 +493,7 @@ Compute a single orbit or a bunch of orbits in the given potential.
     method (optional, string):  choice of the ODE integrator, available variants are 'dop853' (default; 8th order Runge-Kutta) or 'hermite' (4th order, may be more efficient in the regime of low accuracy).
     verbose (optional, default True):  whether to display progress when integrating multiple orbits.
   Returns:
+
     depending on the arguments, one or a tuple of several data containers (one for each target, plus an extra one for trajectories if trajsize>0, plus another one for deviation vectors if der=True, plus another one for Lyapunov exponents if lyapunov=True). 
     Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, and C is the number of constraints in the target (varies between targets); if there was a single orbit, then this would be a 1d array of length C. These data storage arrays should be provided to the `solveOpt()` routine. 
     Lyapunov exponent is a single number for one orbit, or a 1d array for several orbits.
@@ -346,3 +539,6 @@ GalaxyModel is a class that takes together a Potential, a DistributionFunction, 
 function GalaxyModel end
 
 end
+
+
+
