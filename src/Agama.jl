@@ -116,12 +116,13 @@ end
 
 
 """
-    potential(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    potential(potential::Potential, pos::AbstractMatrix{<:Real}[, units; t])
 
 Given a 3xN matrix of positions, returns the potential at each position. 
 Optionally can specify `t`. 
 """
 function potential(potential::Potential, pos::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); t=nothing)
+    kwargs = time_to_kwargs(t, units)
 
     phi_py =  potential._py.potential(mat2py(pos ./ length_scale(units)); kwargs...) 
     return py2vec(phi_py) .* potential_scale(units)
@@ -129,7 +130,7 @@ end
 
 
 """
-    potential(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    potential(potential::Potential, pos::AbstractVector{<:Real}[, units; t])
 
 Given a 3 vector of positions, returns the potential at that position.
 Optionally can specify `t`.
@@ -143,7 +144,7 @@ end
 
 
 """
-    enclosed_mass(potential::Potential, radii, units; t)
+    enclosed_mass(potential::Potential, radii[, units; t])
 
 Return the mass enclosed within a sphere of given radius (radii).
 """
@@ -170,8 +171,8 @@ Compute the circular velocity at the given radius / radii.
 Uses `enclosed_mass` to compute spherically averaged enclosed mass at each radius.
 """
 function circular_velocity(potential::Potential, radii, units::AgamaUnits=current_units(); t=nothing)
-    M = enclosed_mass(potential, radii)
-    return @. sqrt(M / r)
+    M = enclosed_mass(potential, radii, units, t=t)
+    return @. sqrt(M / radii)
 end
 
 
@@ -198,7 +199,7 @@ end
 
 
 """
-    acceleration(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    acceleration(potential::Potential, pos::AbstractMatrix{<:Real}[, units; t])
 
 Given a 3xN matrix of positions, returns the acceleration at each position.
 Optionally can specify `t`.
@@ -212,7 +213,7 @@ end
 
 
 """
-    acceleration(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    acceleration(potential::Potential, pos::AbstractVector{<:Real}[, units; t])
 
 Given a 3 vector of positions, returns the acceleration at that position.
 Optionally can specify `t`.
@@ -226,7 +227,7 @@ end
 
 
 """
-    density(potential::Potential, pos::AbstractMatrix{<:Real}; kwargs...)
+    density(potential::Potential, pos::AbstractMatrix{<:Real}[, units; t])
 
 Given a 3xN matrix of positions, returns the density at each position.
 Optionally can specify `t`.
@@ -240,7 +241,7 @@ end
 
 
 """
-    density(potential::Potential, pos::AbstractVector{<:Real}; kwargs...)
+    density(potential::Potential, pos::AbstractVector{<:Real}[, units; t])
 
 Given a 3 vector of positions, returns the density at that position.
 Optionally can specify `t`.

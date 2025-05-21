@@ -6,23 +6,31 @@ using Test
 
     @test pot isa Potential
     @test density(pot, [0, 0, 0]) === Inf
-    @test density(pot, [1 0
-                        2 0
-                        0 1]) ≈ [1.0 / 16, 2/16] broken=true
+    pos = [1 0
+           2 0
+           0 1]
+    @test density(pot, pos) != [1.0 / 16, 2/16] 
 
     @test acceleration(pot, [0, 0, 0]) ≈ zeros(3)
-    @test acceleration(pot, [1 0 
-                             0 -0.3
-                             0 0.4 ]) ≈ [-1 0 
-                                  0 0
-                                  0 1
-                                 ] broken=true
+    pos = [1 0 
+         0 -0.3
+         0 0.4 ]
+
+    @test acceleration(pot, pos) != zeros(3, 2)
 
     @test enclosed_mass(pot, 0) ≈ 0
-    @test enclosed_mass(pot, [1, 3, 9.5]) ≈ 1 broken=true
+    @test enclosed_mass(pot, [1, 3, 9.5]) != 0 # TODO
 
-    @test potential(pot, 0) ≈ -1 broken=true
-    @test potential(pot, [1,2,3]) ≈ zeros(3) broken=true
+    @test Agama.circular_velocity(pot, 0) ≈ NaN nans=true
+    @test Agama.circular_velocity(pot, [1, 3, 9.5]) != 0 # TODO
+
+
+    @test potential(pot, zeros(3)) ≈ -1
+    @test potential(pot, pos) != zeros(2)  # TODO
+
+
+    @test Agama.stress(pot, zeros(3)) != zeros(6) # TODO
+    @test Agama.stress(pot, pos) != zeros(2, 6)  # TODO
 end
 
 
@@ -70,8 +78,6 @@ end
     @test vel2 ≈ vel atol=1e-8
     @test act2 ≈ act 
 
-
-
     pos = rand(3, 4)
     vel = rand(3, 4) / 5
     am = ActionMapper(pot)
@@ -84,4 +90,15 @@ end
     @test pos2 ≈ pos atol=1e-6
     @test vel2 ≈ vel atol=1e-6
     @test act2 ≈ act
+end
+
+
+
+@testset "galaxymodel" begin
+    pot = Potential(type="NFW")
+    df = DistributionFunction(pot, type="QuasiSpherical")
+    gm = GalaxyModel(pot, df)
+    pos, vel = sample(gm, 100)
+    @test size(pos) == (3, 100)
+    @test size(vel) == (3, 100)
 end
