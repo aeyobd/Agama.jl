@@ -42,6 +42,9 @@ end
 
     o = orbit(pot, pos, vel, timerange=(0, 10))
     @test o isa Agama.Orbit
+    @test Agama.positions(o) == o.positions
+    @test Agama.velocities(o) == o.velocities
+    @test Agama.times(o) == o.times
 
 
 

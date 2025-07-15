@@ -1,7 +1,7 @@
 name = "Agama"
 uuid = "c9d1a974-9120-43da-b5b1-d69fd551855f"
 authors = ["Daniel Boyea <aeyobd@github.com> and contributors"]
-version = "1.0.3-DEV"
+version = "1.0.4-DEV"
 
 [deps]
 CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"

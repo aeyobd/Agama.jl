@@ -1,5 +1,7 @@
 module Agama
 
+import Base: +
+
 using PythonCall
 
 export py2f, py2vec, py2mat
@@ -52,6 +54,7 @@ Units used in vasiliev+2021 (for example) relative to my units
 const VASILIEV_UNITS = AgamaUnits(velocity_scale=0.0048216007714561235)
 
 global _global_units::AgamaUnits = AgamaUnits()
+
 
 function set_units!(u::AgamaUnits)
     global _global_units = u
@@ -112,6 +115,26 @@ end
 
 function Potential(; kwargs...)
     return Potential(agama[].Potential(;kwargs...))
+end
+
+
+"""
+    getindex(p::Potential, i)
+
+Retrieve the i'th component of the potential (1-indexed)
+"""
+function Base.getindex(p::Potential, i::Integer)
+    return Potential(p._py[i + 1])
+end
+
+
+"""
+    +(p::Potential, q::Potential)
+
+Add together the Agama Potentials, returning a new potential object.
+"""
+function (+)(p::Potential, q::Potential)
+    return Potential(p._py + q._py)
 end
 
 
@@ -305,7 +328,28 @@ Base.@kwdef struct Orbit
     _py::Py
 end
 
+"""Retrieve the positions of the orbit"""
+function positions(o::Orbit)
+    return o.positions
+end
 
+"""Retrieve the velocities of the orbit"""
+function velocities(o::Orbit)
+    return o.velocities
+end
+
+"""Retrieve the times of the orbit"""
+function times(o::Orbit)
+    return o.times
+end
+
+
+"""
+    orbit(potential::Potential, positions, velocities, units::AgamaUnits; timerange, N, kwargs...)
+
+Computes the Agama orbit given the initial positions and velocities over the timerange with N steps. If N is zero, return the adaptive steps. kwargs passed to the python version (see alternate docstring).
+Positions and velocities may be a vector (one particle) or a 6xN matrix (many particles). Typically, passing all the positions/velocities at once is faster.
+"""
 function orbit(potential, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
     timestart = timerange[1] * time_scale(units)
     time = (timerange[2] - timerange[1]) * time_scale(units)
