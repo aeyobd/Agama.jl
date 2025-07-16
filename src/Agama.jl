@@ -351,8 +351,8 @@ Computes the Agama orbit given the initial positions and velocities over the tim
 Positions and velocities may be a vector (one particle) or a 6xN matrix (many particles). Typically, passing all the positions/velocities at once is faster.
 """
 function orbit(potential, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
-    timestart = timerange[1] * time_scale(units)
-    time = (timerange[2] - timerange[1]) * time_scale(units)
+    timestart = timerange[1] / time_scale(units)
+    time = (timerange[2] - timerange[1]) / time_scale(units)
     ic = [positions ./ length_scale(units); velocities ./ velocity_scale(units)]
 
     pyorbit = agama[].orbit(ic=ic, time=time, trajsize=N, timestart=timestart, potential=potential._py; kwargs...)
@@ -370,8 +370,8 @@ end
 
 
 function orbit(potential, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
-    timestart = timerange[1] * time_scale(units)
-    time = (timerange[2] - timerange[1]) * time_scale(units)
+    timestart = timerange[1] / time_scale(units)
+    time = (timerange[2] - timerange[1]) / time_scale(units)
     pos_a = positions ./ length_scale(units)
     vel_a = velocities ./ velocity_scale(units)
     ic = vcat(pos_a, vel_a)'
