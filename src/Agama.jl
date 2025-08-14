@@ -117,6 +117,7 @@ function Potential(; kwargs...)
     return Potential(agama[].Potential(;kwargs...))
 end
 
+Base.Broadcast.broadcastable(p::Potential) = Ref(p)
 
 """
     getindex(p::Potential, i)
@@ -451,7 +452,7 @@ See also ActionFinder documentation
 function actions(af::ActionFinder, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real},
         units::AgamaUnits=current_units())
     pos_a = positions / length_scale(units)
-    vel_a = velocities / length_scale(units)
+    vel_a = velocities / velocity_scale(units)
     posvel = vcat(pos_a, vel_a)
     actions_a = af._py(posvel) |> py2vec
     return actions_a * velocity_scale(units) * length_scale(units)
@@ -461,7 +462,7 @@ end
 function actions(af::ActionFinder, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real},
         units::AgamaUnits=current_units())
     pos_a = positions / length_scale(units)
-    vel_a = velocities / length_scale(units)
+    vel_a = velocities / velocity_scale(units)
     posvel = vcat(pos_a, vel_a) |> mat2py
     actions_a = af._py(posvel) |> py2mat
     return actions_a * velocity_scale(units) * length_scale(units)
@@ -603,8 +604,9 @@ Potential is a class that represents a wide range of gravitational potentials.
   Most of these parameters have reasonable default values; the only necessary ones are `type`, and for a potential expansion, `density` or `file` or `particles`.
   If the parameters of the potential (including the coefficients of a potential expansion) areloaded from a file, then the `type` argument should not be provided, and the argument name `file=` may be omitted (i.e., may provide only the filename as an unnamed string argument).
   One may create a modified version of an existing Potential object, by passing it as a `potential` argument together with one or more modifier parameters (center, orientation, rotation and scale); in this case, `type` should be empty.
-  Examples:
-  
+
+##  Examples
+ ```py
   >>> pot_halo = Potential(type='Dehnen', mass=1e12, gamma=1, scaleRadius=100, p=0.8, q=0.6)
   >>> pot_disk = Potential(type='MiyamotoNagai', mass=5e10, scaleRadius=5, scaleHeight=0.5)
   >>> pot_composite = Potential(pot_halo, pot_disk)
@@ -618,7 +620,7 @@ Potential is a class that represents a wide range of gravitational potentials.
   >>> disk_par = dict(type='Disk', surfaceDensity=1e9, scaleRadius=3, scaleHeight=0.4)
   >>> halo_par = dict(type='Spheroid', densityNorm=2e7, scaleRadius=15, gamma=1, beta=3, outerCutoffRadius=150, axisRatioZ=0.8)
   >>> pot_galpot = Potential(disk_par, halo_par)
-  
+ ```
   The latter example illustrates the use of GalPot components (exponential disks and spheroids) from Dehnen&Binney 1998; these are internally implemented using a Multipole potential expansion and a special variant of disk potential, but may also be combined with any other components if needed.
   The numerical values in the above examples are given in solar masses and kiloparsecs; a call to `setUnits(length=1, mass=1, velocity=1)` should precede the construction of potentials in this approach. Alternatively, one may provide no units at all, and use the `N-body` convention G=1 (this is the default regime and is restored by calling `setUnits()` without arguments).
 """
@@ -663,20 +665,20 @@ Create an orbit object. Wrapper around python interface.
 # Agama documentation
 Compute a single orbit or a bunch of orbits in the given potential.
   Named arguments:
-    ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.
-    potential:  a Potential object or a compatible interface.
-    Omega (optional, default 0):  pattern speed of the rotating frame.
-    time:  total integration time - may be a single number (if computing a single orbit or if it is identical for all orbits), or an array of length N (for a bunch of orbits).
-    timestart (optional, default 0):  initial time for the integration (only matters if the potential is time-dependent). The final time is thus timestart+time. May be a single number (for one orbit or if it is identical for all orbits), or an array of length N (for a bunch of orbits).
-    targets (optional):  zero or more instances of Target class (a tuple/list if more than one); each target collects its own data for each orbit.
-    trajsize (optional):  if given, turns on the recording of trajectory for each orbit (should be either a single integer or an array of integers with length N). The trajectory of each orbit is stored either at every timestep of the integrator (if trajsize=0) or at regular intervals of time (`dt=abs(time)/(trajsize-1)`, so that the number of points is `trajsize`; the last stored point is always at the end of integration period, and if trajsize>1, the first point is the initial conditions). If dtype=object and trajsize is not provided explicitly, this is equivalent to setting trajsize=0. Both time and trajsize may differ between orbits.
+- ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.
+- potential:  a Potential object or a compatible interface.
+- Omega (optional, default 0):  pattern speed of the rotating frame.
+- time:  total integration time - may be a single number (if computing a single orbit or if it is identical for all orbits), or an array of length N (for a bunch of orbits).
+- timestart (optional, default 0):  initial time for the integration (only matters if the potential is time-dependent). The final time is thus timestart+time. May be a single number (for one orbit or if it is identical for all orbits), or an array of length N (for a bunch of orbits).
+- targets (optional):  zero or more instances of Target class (a tuple/list if more than one); each target collects its own data for each orbit.
+- trajsize (optional):  if given, turns on the recording of trajectory for each orbit (should be either a single integer or an array of integers with length N). The trajectory of each orbit is stored either at every timestep of the integrator (if trajsize=0) or at regular intervals of time (`dt=abs(time)/(trajsize-1)`, so that the number of points is `trajsize`; the last stored point is always at the end of integration period, and if trajsize>1, the first point is the initial conditions). If dtype=object and trajsize is not provided explicitly, this is equivalent to setting trajsize=0. Both time and trajsize may differ between orbits.
     der (optional, default False):  whether to compute the evolution of deviation vectors (derivatives of the orbit w.r.t. the initial conditions).
     lyapunov (optional, default False):  whether to estimate the Lyapunov exponent, which is a chaos indicator (positive value means that the orbit is chaotic, zero - regular).
-    accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.
-    maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.
-    dtype (optional, default 'float32'):  storage data type for trajectories (see below).
-    method (optional, string):  choice of the ODE integrator, available variants are 'dop853' (default; 8th order Runge-Kutta) or 'hermite' (4th order, may be more efficient in the regime of low accuracy).
-    verbose (optional, default True):  whether to display progress when integrating multiple orbits.
+- accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.
+- maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.
+- dtype (optional, default 'float32'):  storage data type for trajectories (see below).
+- method (optional, string):  choice of the ODE integrator, available variants are 'dop853' (default; 8th order Runge-Kutta) or 'hermite' (4th order, may be more efficient in the regime of low accuracy).
+- verbose (optional, default True):  whether to display progress when integrating multiple orbits.
   Returns:
 
     depending on the arguments, one or a tuple of several data containers (one for each target, plus an extra one for trajectories if trajsize>0, plus another one for deviation vectors if der=True, plus another one for Lyapunov exponents if lyapunov=True). 
@@ -714,8 +716,8 @@ Create a galaxy model object. Wrapper around python interface.
 # Agama documentation
 GalaxyModel is a class that takes together a Potential, a DistributionFunction, and an ActionFinder objects, and provides methods to compute moments and projections of the distribution function at a given point in the ordinary phase space (coordinate/velocity), as well as methods for drawing samples from the distribution function in the given potential.
   The constructor takes the following arguments:
-    potential - a Potential object.
-    df - a DistributionFunction object.
+- potential - a Potential object.
+- df - a DistributionFunction object.
     af (optional) - an ActionFinder object - must be constructed for the same potential; if not provided, then the action finder is created internally.
     sf (optional) - a SelectionFunction object or a user-defined callable function that takes a 2d Nx6 array of phase-space points (x,v in cartesian coordinates) as input, and returns a 1d array of N values between 0 and 1, which will be multiplied by the values of the DF at corresponding points; if not provided, assumed identically unity.
   In case of a multicomponent DF, one may compute the moments and projections for each component separately by providing an optional flag 'separate=True' to the corresponding methods. This is more efficient than constructing a separate GalaxyModel instance for each DF component and computing its moments, because the most expensive operation - conversion between position/velocity and action space - is performed once for all components. If this flag is not set (default), all components are summed up.
