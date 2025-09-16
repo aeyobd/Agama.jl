@@ -479,7 +479,7 @@ See also ActionFinder documentation
 """
 function actions_angles(af::ActionFinder, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units())
     pos_a = positions ./ length_scale(units)
-    vel_a = velocities ./ length_scale(units)
+    vel_a = velocities ./ velocity_scale(units)
 
     posvel = vcat(pos_a, vel_a)
     aang = af._py(posvel, angles=true, frequencies=true)
@@ -494,7 +494,7 @@ end
 
 function actions_angles(af::ActionFinder, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real}, units::AgamaUnits=current_units())
     pos_a = positions ./ length_scale(units)
-    vel_a = velocities ./ length_scale(units)
+    vel_a = velocities ./ velocity_scale(units)
 
     posvel = vcat(pos_a, vel_a) |> mat2py
     aang = af._py(posvel; angles=true, frequencies=true) 
