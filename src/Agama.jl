@@ -344,6 +344,17 @@ function times(o::Orbit)
     return o.times
 end
 
+function _split_timerange(timerange::Tuple{<:Real, <:Real}, units)
+    timestart = timerange[1] / time_scale(units)
+    time = (timerange[2] - timerange[1]) / time_scale(units)
+    return timestart, time
+end
+
+function _split_timerange(timerange::AbstractVector{<:Tuple},  units)
+    timestart = first.(timerange) / time_scale(units)
+    time = (last.(timerange) .- first.(timerange)) / time_scale(units)
+    return timestart, time
+end
 
 """
     orbit(potential::Potential, positions, velocities, units::AgamaUnits; timerange, N, kwargs...)
@@ -352,8 +363,8 @@ Computes the Agama orbit given the initial positions and velocities over the tim
 Positions and velocities may be a vector (one particle) or a 6xN matrix (many particles). Typically, passing all the positions/velocities at once is faster.
 """
 function orbit(potential, positions::AbstractVector{<:Real}, velocities::AbstractVector{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
-    timestart = timerange[1] / time_scale(units)
-    time = (timerange[2] - timerange[1]) / time_scale(units)
+    timestart, time = _split_timerange(timerange, units)
+
     ic = [positions ./ length_scale(units); velocities ./ velocity_scale(units)]
 
     pyorbit = agama[].orbit(ic=ic, time=time, trajsize=N, timestart=timestart, potential=potential._py; kwargs...)
@@ -371,8 +382,7 @@ end
 
 
 function orbit(potential, positions::AbstractMatrix{<:Real}, velocities::AbstractMatrix{<:Real}, units::AgamaUnits=current_units(); timerange, N=1000, kwargs...)
-    timestart = timerange[1] / time_scale(units)
-    time = (timerange[2] - timerange[1]) / time_scale(units)
+    timestart, time = _split_timerange(timerange, units)
     pos_a = positions ./ length_scale(units)
     vel_a = velocities ./ velocity_scale(units)
     ic = vcat(pos_a, vel_a)'
@@ -380,12 +390,13 @@ function orbit(potential, positions::AbstractMatrix{<:Real}, velocities::Abstrac
     pyorbit = agama[].orbit(ic=ic, time=time, timestart=timestart, potential=potential._py, trajsize=N; kwargs...)
     
     Np = size(positions, 2)
-    pytime = pyorbit[0][0]
-    time_a = py2vec(pytime) 
-    times = time_a * time_scale(units)
 
     orbits = Vector{Orbit}(undef, Np)
     for i in 1:size(positions, 2)
+        pytime = pyorbit[i-1][0]
+        time_a = py2vec(pytime) 
+        times = time_a * time_scale(units)
+
         posvel = py2mat(pyorbit[i-1][1])
         #@assert pyconvert(o[i-1][0]) ≈ time_a
         positions = posvel[1:3, :] .* length_scale(units)
